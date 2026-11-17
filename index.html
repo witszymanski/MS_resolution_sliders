@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mass Resolution Slider</title>
+  <title>Mass Resolution Slider (3 Peaks)</title>
   <style>
     body {
       margin: 0;
@@ -50,7 +50,7 @@
   <canvas id="ms-canvas" width="750" height="360"></canvas>
 
   <div class="caption">
-    Simulated equal-intensity ions at <strong>m/z 500.00</strong> and <strong>m/z 500.05</strong> (&Delta;m = 0.05 Da).
+    Simulated ions at <strong>m/z 500.00</strong> (100%), <strong>m/z 500.05</strong> (100%), and <strong>m/z 500.12</strong> (70%).
   </div>
 
   <script>
@@ -60,13 +60,18 @@
     const resLabel = document.getElementById('res-val');
     const fwhmLabel = document.getElementById('fwhm-val');
 
-    const m1 = 500.00;
-    const m2 = 500.05;
-    const xMin = 499.75;
-    const xMax = 500.30;
+    // Ion definitions: mass-to-charge (mz), relative intensity (amp), and color
+    const ions = [
+      { mz: 500.00, amp: 1.0, color: 'rgba(49, 130, 206, 0.55)', label: 'Ion 1 (500.00)' },
+      { mz: 500.05, amp: 1.0, color: 'rgba(56, 161, 105, 0.55)', label: 'Ion 2 (500.05)' },
+      { mz: 500.12, amp: 0.7, color: 'rgba(128, 90, 213, 0.55)', label: 'Ion 3 (500.12)' }
+    ];
 
-    function gaussian(x, mu, sigma) {
-      return Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
+    const xMin = 499.75;
+    const xMax = 500.35;
+
+    function gaussian(x, mu, sigma, amp) {
+      return amp * Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
     }
 
     function draw() {
@@ -85,17 +90,16 @@
 
       ctx.clearRect(0, 0, w, h);
 
-      const steps = 600;
+      const steps = 650;
       const pts = [];
       let maxY = 1.0;
 
       for (let i = 0; i <= steps; i++) {
         const mz = xMin + (i / steps) * (xMax - xMin);
-        const y1 = gaussian(mz, m1, sigma);
-        const y2 = gaussian(mz, m2, sigma);
-        const ySum = y1 + y2;
+        const yVals = ions.map(ion => gaussian(mz, ion.mz, sigma, ion.amp));
+        const ySum = yVals.reduce((acc, v) => acc + v, 0);
         if (ySum > maxY) maxY = ySum;
-        pts.push({ mz, y1, y2, ySum });
+        pts.push({ mz, yVals, ySum });
       }
 
       const scaleY = maxY > 1.05 ? maxY : 1.05;
@@ -106,7 +110,7 @@
       ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let mz = 499.80; mz <= 500.25; mz += 0.05) {
+      for (let mz = 499.80; mz <= 500.301; mz += 0.05) {
         const px = toX(mz);
         ctx.moveTo(px, pad.top);
         ctx.lineTo(px, pad.top + plotH);
@@ -122,16 +126,17 @@
       ctx.lineTo(pad.left + plotW, pad.top + plotH);
       ctx.stroke();
 
-      // Labels
+      // X-axis Labels
       ctx.fillStyle = '#2d3748';
       ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
-      for (let mz = 499.80; mz <= 500.251; mz += 0.05) {
+      for (let mz = 499.80; mz <= 500.301; mz += 0.05) {
         ctx.fillText(mz.toFixed(2), toX(mz), pad.top + plotH + 20);
       }
       ctx.font = 'bold 14px sans-serif';
       ctx.fillText('Mass-to-Charge Ratio (m/z)', pad.left + plotW / 2, h - 8);
 
+      // Y-axis Label
       ctx.save();
       ctx.translate(18, pad.top + plotH / 2);
       ctx.rotate(-Math.PI / 2);
@@ -139,14 +144,14 @@
       ctx.restore();
 
       // Individual Ions (Dashed)
-      ['y1', 'y2'].forEach((key, idx) => {
-        ctx.strokeStyle = idx === 0 ? 'rgba(49, 130, 206, 0.45)' : 'rgba(56, 161, 105, 0.45)';
-        ctx.setLineDash([5, 5]);
-        ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      ions.forEach((ion, idx) => {
+        ctx.strokeStyle = ion.color;
         ctx.beginPath();
         pts.forEach((p, i) => {
           const px = toX(p.mz);
-          const py = toY(p[key]);
+          const py = toY(p.yVals[idx]);
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
@@ -154,7 +159,7 @@
       });
       ctx.setLineDash([]);
 
-      // Combined Spectrum (Solid)
+      // Combined Spectrum (Solid Red)
       ctx.strokeStyle = '#e53e3e';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -169,13 +174,18 @@
       // Legend
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'left';
+      const legX = w - 185;
+      
       ctx.fillStyle = '#e53e3e';
-      ctx.fillRect(w - 210, 42, 16, 3);
+      ctx.fillRect(legX, 42, 16, 3);
       ctx.fillStyle = '#2d3748';
-      ctx.fillText('Measured Spectrum', w - 188, 47);
+      ctx.fillText('Measured Spectrum', legX + 22, 47);
 
-      ctx.fillStyle = '#3182ce';
-      ctx.fillText('--- Ion 1 (500.00) & Ion 2 (500.05)', w - 210, 66);
+      ions.forEach((ion, idx) => {
+        const yPos = 66 + idx * 18;
+        ctx.fillStyle = ion.color.replace('0.55', '1');
+        ctx.fillText(`--- ${ion.label}`, legX, yPos);
+      });
     }
 
     slider.addEventListener('input', draw);
