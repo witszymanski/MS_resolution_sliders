@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mass Resolution Slider</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      font-size: 15px;
+      flex-wrap: wrap;
+    }
+    canvas {
+      background: #ffffff;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      max-width: 100%;
+      height: auto;
+    }
+    .caption {
+      font-size: 13px;
+      color: #555;
+      margin-top: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <label for="res-slider"><strong>Resolving Power (R):</strong></label>
+    <input type="range" id="res-slider" min="1500" max="60000" step="500" value="5000" style="width: 240px; cursor: pointer;">
+    <span id="res-val" style="min-width: 65px; font-weight: bold; color: #2b6cb0;">5,000</span>
+    <span id="fwhm-val" style="color: #666;">(FWHM: 0.1000 Da)</span>
+  </div>
+
+  <canvas id="ms-canvas" width="750" height="360"></canvas>
+
+  <div class="caption">
+    Simulated equal-intensity ions at <strong>m/z 500.00</strong> and <strong>m/z 500.05</strong> (&Delta;m = 0.05 Da).
+  </div>
+
+  <script>
+    const canvas = document.getElementById('ms-canvas');
+    const ctx = canvas.getContext('2d');
+    const slider = document.getElementById('res-slider');
+    const resLabel = document.getElementById('res-val');
+    const fwhmLabel = document.getElementById('fwhm-val');
+
+    const m1 = 500.00;
+    const m2 = 500.05;
+    const xMin = 499.75;
+    const xMax = 500.30;
+
+    function gaussian(x, mu, sigma) {
+      return Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
+    }
+
+    function draw() {
+      const R = parseInt(slider.value, 10);
+      const fwhm = 500.0 / R;
+      const sigma = fwhm / 2.35482;
+
+      resLabel.textContent = R.toLocaleString();
+      fwhmLabel.textContent = `(FWHM: ${fwhm.toFixed(4)} Da)`;
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const pad = { top: 30, right: 30, bottom: 45, left: 55 };
+      const plotW = w - pad.left - pad.right;
+      const plotH = h - pad.top - pad.bottom;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const steps = 600;
+      const pts = [];
+      let maxY = 1.0;
+
+      for (let i = 0; i <= steps; i++) {
+        const mz = xMin + (i / steps) * (xMax - xMin);
+        const y1 = gaussian(mz, m1, sigma);
+        const y2 = gaussian(mz, m2, sigma);
+        const ySum = y1 + y2;
+        if (ySum > maxY) maxY = ySum;
+        pts.push({ mz, y1, y2, ySum });
+      }
+
+      const scaleY = maxY > 1.05 ? maxY : 1.05;
+      const toX = (mz) => pad.left + ((mz - xMin) / (xMax - xMin)) * plotW;
+      const toY = (val) => pad.top + plotH - (val / scaleY) * plotH;
+
+      // Grid
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let mz = 499.80; mz <= 500.25; mz += 0.05) {
+        const px = toX(mz);
+        ctx.moveTo(px, pad.top);
+        ctx.lineTo(px, pad.top + plotH);
+      }
+      ctx.stroke();
+
+      // Axes
+      ctx.strokeStyle = '#4a5568';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + plotH);
+      ctx.lineTo(pad.left + plotW, pad.top + plotH);
+      ctx.stroke();
+
+      // Labels
+      ctx.fillStyle = '#2d3748';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      for (let mz = 499.80; mz <= 500.251; mz += 0.05) {
+        ctx.fillText(mz.toFixed(2), toX(mz), pad.top + plotH + 20);
+      }
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText('Mass-to-Charge Ratio (m/z)', pad.left + plotW / 2, h - 8);
+
+      ctx.save();
+      ctx.translate(18, pad.top + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('Relative Intensity', 0, 0);
+      ctx.restore();
+
+      // Individual Ions (Dashed)
+      ['y1', 'y2'].forEach((key, idx) => {
+        ctx.strokeStyle = idx === 0 ? 'rgba(49, 130, 206, 0.45)' : 'rgba(56, 161, 105, 0.45)';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+          const px = toX(p.mz);
+          const py = toY(p[key]);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      // Combined Spectrum (Solid)
+      ctx.strokeStyle = '#e53e3e';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const px = toX(p.mz);
+        const py = toY(p.ySum);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+
+      // Legend
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e53e3e';
+      ctx.fillRect(w - 210, 42, 16, 3);
+      ctx.fillStyle = '#2d3748';
+      ctx.fillText('Measured Spectrum', w - 188, 47);
+
+      ctx.fillStyle = '#3182ce';
+      ctx.fillText('--- Ion 1 (500.00) & Ion 2 (500.05)', w - 210, 66);
+    }
+
+    slider.addEventListener('input', draw);
+    draw();
+  </script>
+</body>
+</html>
